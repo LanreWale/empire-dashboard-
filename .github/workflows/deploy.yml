@@ -1,0 +1,60 @@
+name: Deploy Python Flask to Cloud Run
+
+on:
+  push:
+    branches:
+      - main # This workflow runs when changes are pushed to the 'main' branch
+
+env:
+  PROJECT_ID: the-empire-dashboard-18c9f # Your Google Cloud Project ID
+  SERVICE_NAME: cpa-backend # Your desired Cloud Run service name
+  REGION: southafrica-west1 # Your desired Google Cloud region (South Africa)
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest # Use the latest Ubuntu runner provided by GitHub Actions
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4 # Action to check out your repository code
+
+      - name: Authenticate with Google Cloud
+        # This step uses the GitHub secret GCP_SA_KEY to authenticate with Google Cloud
+        id: 'auth'
+        uses: 'google-github-actions/auth@v2'
+        with:
+          credentials_json: '${{ secrets.GCP_SA_KEY }}' # The GitHub secret containing your service account key
+
+      - name: Set up Cloud SDK
+        # Sets up the Google Cloud SDK environment
+        uses: 'google-github-actions/setup-gcloud@v2'
+
+      - name: Build and Deploy to Cloud Run
+        # This step builds your Docker image and deploys it to Cloud Run
+        run: |
+          # Ensure you are in the directory containing your main.py and requirements.txt
+          # If your main.py is directly in the root of your repo, you might not need `cd functions`
+          # If your Python code is in a 'functions' sub-directory (as per Firebase Functions setup),
+          # then you need to navigate into it.
+          # Assuming your Python backend is in a 'functions' folder relative to your repo root:
+          cd functions
+
+          # Build the Docker image
+          gcloud builds submit --tag gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}
+
+          # Deploy the service to Cloud Run
+          gcloud run deploy ${{ env.SERVICE_NAME }} \
+            --image gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }} \
+            --platform managed \
+            --region ${{ env.REGION }} \
+            --allow-unauthenticated \
+            --set-env-vars CPA_GRIP_ACCOUNTS_CONFIG="$(gcloud functions configs describe cpa_grip --format='json' | jq -r '.accounts')" \
+            --timeout=300s # Increase timeout for initial deployments if needed
+
+      - name: Get Cloud Run Service URL
+        # Optional: Get the deployed service URL and print it
+        run: |
+          SERVICE_URL=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
+            --region ${{ env.REGION }} \
+            --format 'value(status.url)')
+          echo "Cloud Run Service URL: $SERVICE_URL"
